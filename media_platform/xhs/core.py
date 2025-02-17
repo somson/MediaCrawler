@@ -7,8 +7,8 @@
 #
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
-
-
+import datetime
+import pathlib
 import asyncio
 import os
 import random
@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from playwright.async_api import BrowserContext, BrowserType, Page, async_playwright
 from tenacity import RetryError
-
+import json
 import config
 from base.base_crawler import AbstractCrawler
 from config import CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
@@ -41,6 +41,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
     browser_context: BrowserContext
 
     def __init__(self) -> None:
+        self._latest_mention_dir = "data/xhs_mention/latest"
+        self._mention_dir = "data/xhs_mention"
+
         self.index_url = "https://www.xiaohongshu.com"
         # self.user_agent = utils.get_user_agent()
         self.user_agent = config.UA if config.UA else "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -103,10 +106,81 @@ class XiaoHongShuCrawler(AbstractCrawler):
             elif config.CRAWLER_TYPE == "creator":
                 # Get creator's information and their notes and comments
                 await self.get_creators_and_notes()
+            elif config.CRAWLER_TYPE == "mention":
+                # get account methions
+                await self.get_my_mentions()
             else:
                 pass
 
             utils.logger.info("[XiaoHongShuCrawler.start] Xhs Crawler finished ...")
+
+    def get_latest_mention_id(self):
+        pathlib.Path(self._latest_mention_dir).mkdir(parents=True, exist_ok=True)
+        file_path = os.path.join(self._latest_mention_dir, "last_mention.txt")
+        if not os.path.exists(file_path):
+            return ""
+        
+        with open(file_path, 'r') as f:
+            return f.read().strip()
+
+    def update_lastest_mention_id(self, lastest_mention_id):
+        pathlib.Path(self._latest_mention_dir).mkdir(parents=True, exist_ok=True)
+        file_path = os.path.join(self._latest_mention_dir, "last_mention.txt")
+        with open(file_path, 'w') as f:
+            f.write(str(lastest_mention_id))
+
+    def record_my_mentions(self, mentions: List[Dict]):
+        dir = os.path.join(self._mention_dir, str(datetime.datetime.now().date()))
+        pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
+        file_path = os.path.join(dir, "data.json")
+        with open(file_path, 'a') as f:
+            for mention in mentions:
+                f.write(json.dumps(mention))
+                f.write('\n')
+
+    async def get_my_mentions(self):
+        """
+        Get account mentions
+        """
+        first = True
+        while True:
+            if first:
+                first = False
+            else:
+                # 等待5分钟
+                time.sleep(5)
+            num, cursor= 2, ""
+            # 读取最新的通知ID
+            latest_mention_id = self.get_latest_mention_id()
+            utils.logger.info(f"[XiaoHongShuCrawler.mention] mentions: 新一轮请求开启{latest_mention_id}")
+            # 轮训最新的通知
+            new_mentions = []
+            while True:
+                res = await self.xhs_client.get_my_mentions(num=num, cursor=cursor)
+                message_list = res.get("message_list", [])
+                need_break = False
+                for message in message_list:
+                    msg_id = message['id']
+                    if latest_mention_id and msg_id == latest_mention_id:
+                        need_break = True
+                        break
+                    new_mentions.append(message)
+                if need_break:
+                    break
+                utils.logger.info(f"[XiaoHongShuCrawler.mention] mentions: message_list={len(message_list)} has_more={res.get('has_more')} cursor={res.get('strCursor')}")
+                # 如果没有下一页
+                if not res.get("has_more"):
+                    break
+                cursor = res.get("strCursor")
+                utils.logger.info(f"[XiaoHongShuCrawler.mention] mentions: 准备请求下一页 cursor={cursor}")
+                time.sleep(2)
+            
+            if new_mentions:
+                # 更新最新的ID
+                self.update_lastest_mention_id(new_mentions[0]['id'])
+                # 追加数据
+                self.record_my_mentions(new_mentions[::-1])
+
 
     async def search(self) -> None:
         """Search for notes and retrieve their comment information."""

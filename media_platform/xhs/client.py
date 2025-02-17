@@ -199,6 +199,16 @@ class XiaoHongShuClient(AbstractApiClient):
         self.headers["Cookie"] = cookie_str
         self.cookie_dict = cookie_dict
 
+    async def get_my_mentions(self, num: int, cursor: str):
+        """请求通知"""
+        uri = "/api/sns/web/v1/you/mentions"
+        data = {
+            "num": num,
+            "cursor": cursor
+        }
+        return await self.get(uri, data)
+
+
     async def get_note_by_keyword(
         self,
         keyword: str,
