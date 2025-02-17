@@ -148,7 +148,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 first = False
             else:
                 # 等待5分钟
-                time.sleep(5)
+                time.sleep(5*60)
             num, cursor= 2, ""
             # 读取最新的通知ID
             latest_mention_id = self.get_latest_mention_id()
